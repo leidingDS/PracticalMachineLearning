@@ -1,0 +1,137 @@
+---
+title: "Practical Machine Learning Course Project"
+output: html_document
+---
+
+## Executive Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.   
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise, which is the "classe" variable in the training set.  
+
+From the anlysis in below, we conclude that using the Random Forest model, we reached accuracy of 99.44% to predict how well a person is preforming an excercise with . 
+
+## Data Processing
+
+The training data for this project are available here [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)  
+
+The test data are available here [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+
+### Downloading Data
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+TrainingRaw <- "./pml-trainingraw.csv"
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(url, destfile=TrainingRaw)
+trainingraw <- read.csv(TrainingRaw)
+
+TestingRaw <- "./pml-testingraw.csv"
+url2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url2, destfile=TestingRaw)
+testingraw <- read.csv(TestingRaw)
+```
+
+### Cleaning up Data
+First we will collect all the data from columns whose name containing belt, forearm, arm, and dumbbell.  
+
+There are many columns with empty and NA values, remove those columns and only keep the columns with valid numbers. 
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+idxTraining <- grepl("belt|forearm|arm|dumbbell", names(trainingraw), ignore.case=TRUE)
+isMissing <- sapply(trainingraw, function (x) any(is.na(x) | x == ""))
+cleanedTraining <- trainingraw[, idxTraining & !isMissing==TRUE]
+
+# include the last column "classe" to the new training data set and give a name to it in new data set
+cleanedTraining <- cbind(trainingraw$classe, cleanedTraining)
+colnames(cleanedTraining)[1] <- "classe"
+
+# set the factor for the first column
+cleanedTraining$classe <- factor(cleanedTraining$classe)
+
+# Check the new cleaned data set
+names(cleanedTraining)
+
+# Perform the same clean up for testing raw data
+idxTesting <- grepl("belt|forearm|arm|dumbbell", names(testingraw), ignore.case=TRUE)
+
+# Find the columns with "NA" or empty values
+isMissingTest <- sapply(testingraw, function (x) any(is.na(x) | x == ""))
+
+# Generate clean test data
+cleanedTesting <- testingraw[, idxTesting & !isMissingTest==TRUE]
+cleanedTesting <- cbind(testingraw$problem_id, cleanedTesting)
+colnames(cleanedTesting)[1] <- "classe"
+```
+
+After the cleanup, besides of the outcome column "classe", the new datasets (both cleanedTraining and cleanedTesting) contain 52 predictor variables (we had 159 predictors in orignal datasets downloaded from web).  
+
+### Building Models Using Training Data
+
+First split the dataset into a typical 60% training and 40% testing dataset.
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+library(caret)
+library(randomForest)
+set.seed(666666)
+inTrain <- createDataPartition(y=cleanedTraining$classe, p=0.60, list=FALSE)
+TrainingSet <- cleanedTraining[ inTrain,]
+TestingSet  <- cleanedTraining[-inTrain,]
+```
+
+Next, use "rpart" (Recursive Partitioning and Regression Trees) method and "lda" (Linear Discriminant Analysis) to build 2 models and check the model accuracy using Confusion Matrix on the remaining 40% of test data from training set.
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+# Model #1 - Using rpart: Recursive Partitioning and Regression Trees
+library(rpart)
+modFit1 <- train(classe~., data=TrainingSet, method="rpart")
+pred1 <- predict(modFit1, newdata=TestingSet)
+c1 <- confusionMatrix(pred1, TestingSet$classe)$overall
+
+# Model #2 - Using lda: Linear Discriminant Analysis. 
+library(MASS)
+modFit2 <- train(classe~., data=TrainingSet, method="lda")
+pred2 <- predict(modFit2, newdata=TestingSet)
+c2 <- confusionMatrix(pred2, TestingSet$classe)$overall
+
+# Compare the model accuracy 
+accuracyrate <- cbind(c1[1], c2[1])
+colnames(accuracyrate) <- c("rpart", "lda")
+accuracyrate
+```
+
+The model accuracy of "rpart" is ~54.78% and the model accuracy of lda is ~70.39%, both are not high.     
+
+Random Forest is one of the two top performing algorithms in predictions contests. Although it is difficult to interpret, it is often very accurate, We will create the third model using Random Forest and compare accuracy with other 2 models. 
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+modFit3 <- randomForest(TrainingSet$classe ~ ., data = TrainingSet)
+modFit3
+pred3 <- predict(modFit3, newdata=TestingSet)
+c3 <- confusionMatrix(pred3, TestingSet$classe)$overall
+accuracyrate <- cbind(c1[1], c2[1], c3[1])
+colnames(accuracyrate) <- c("rpart", "lda", "  RandomForest")
+accuracyrate
+```
+
+### Cross-Validation
+The Random Forest model is used to classify the remaining 40% of the data. A Confusion Matrix is created by passing the predictions from the model and the actual classifications, which determines the accuracy of the model.
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+confusionMatrix(pred3, TestingSet$classe)
+
+library(ggplot2)
+TestingSet$predRight <- pred3==TestingSet$classe
+qplot(total_accel_belt, total_accel_arm, colour=predRight, data=TestingSet, main="newdata prediction", size=I(5))
+```
+
+The accuracy of the above model is 99.44% with 0.6% of out-of-sample error. By comparing with "rpart" and "lda", it turns out Random Forest is a great model to fit the given training dataset. 
+
+## Using Models to Predict 20 Test Cases 
+
+Using random forest model to predict the classifications of the 20 results in new testing data (cleanedTesting).
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+# Apply the prediction to the cleaned test data
+predictTest <- predict(modFit3, newdata=cleanedTesting)
+predictTest
+```
+
